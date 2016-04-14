@@ -45,20 +45,34 @@ public class Diff {
 	public static Patch diff(Object original, Object modified) throws PatchException {
 		try {
 			List<PatchOperation> operations = new ArrayList<PatchOperation>();
-			if (original instanceof List && modified instanceof List) {
-				diffList(operations, "", (List<?>) original, (List<?>) modified);
-			} else {
-				diffNonList(operations, "", original, modified);
-			}
-			
+			diffObjects(operations, "", original, modified);
+
 			return new Patch(operations);
 		} catch (Exception e) {
 			throw new PatchException("Error performing diff:", e);
 		}
 	}
-	
+
 	// private helpers
-	
+
+	private static void diffObjects(List<PatchOperation> operations, String path, Object origValue, Object modValue)
+			throws IOException, IllegalAccessException {
+		if (origValue != null && modValue != null) {
+			final Class<?> fieldType = origValue.getClass();
+
+			if (Collection.class.isAssignableFrom(fieldType)) {
+				diffList(operations, path, (List<?>) origValue, (List<?>) modValue);
+				return;
+			} else if (fieldType.isArray() && !fieldType.getComponentType().isPrimitive()) {
+				final List<?> origList = Arrays.asList((Object[]) origValue);
+				final List<?> modList = Arrays.asList((Object[]) modValue);
+				diffList(operations, path, origList, modList);
+				return;
+			}
+		}
+		diffNonList(operations, path, origValue, modValue);
+	}
+
 	private static void diffList(List<PatchOperation> operations, String path, List<?> original, List<?> modified) throws IOException, IllegalAccessException {
 	
 		difflib.Patch diff = DiffUtils.diff(original, modified);
@@ -71,7 +85,7 @@ public class Diff {
 				for(int offset = 0; offset < lines.size(); offset++) {
 					Object originalObject = original.get(revisedPosition + offset);
 					Object revisedObject = modified.get(revisedPosition + offset);
-					diffNonList(operations, path + "/" + (revisedPosition + offset), originalObject, revisedObject);					
+					diffObjects(operations, path + "/" + (revisedPosition + offset), originalObject, revisedObject);
 				}
 				
 			} else if (type == TYPE.INSERT) {
@@ -97,7 +111,7 @@ public class Diff {
 				return;
 			}
 			
-			if (isPrimitive(modified)) {
+			if (isPrimitive(modified) || modified.getClass().isArray() && modified.getClass().getComponentType().isPrimitive()) {
 				
 				operations.add(new TestOperation(path, original));
 				if (original == null) {
@@ -107,7 +121,12 @@ public class Diff {
 				}
 				return;
 			}
-						
+
+			if (original == null) {
+				operations.add(new AddOperation(path, modified));
+				return;
+			}
+
 			Class<? extends Object> originalType = original.getClass();
 			Field[] fields = originalType.getDeclaredFields();
 			for (Field field : fields) {
@@ -131,7 +150,7 @@ public class Diff {
 	}
 
 	private static boolean isPrimitive(Object o) {
-		return o instanceof String || o instanceof Number || o instanceof Boolean;
+		return o instanceof String || o instanceof Number || o instanceof Boolean || o instanceof Enum;
 	}
 	
 }
